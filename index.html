@@ -31,17 +31,13 @@
 <div class="page active" id="page-map">
   <div class="map-layout">
 
-    <!-- Static Map 영역 -->
+    <!-- 카카오 지도 영역 -->
     <div id="map-area">
       <div class="map-loading" id="map-loading">
         <div class="map-spinner"></div>
         <span>🌿 지도를 불러오는 중...</span>
       </div>
-      <img id="static-map-img" src="" alt="향남지구 지도" style="opacity:0"
-           onload="onMapLoaded()" onerror="onMapError()"/>
-
-      <!-- 마커 오버레이 -->
-      <div id="marker-layer"></div>
+      <div id="kakao-map"></div>
 
       <!-- 상세 패널 -->
       <div class="detail-panel" id="detail-panel">
@@ -53,9 +49,9 @@
           <button class="detail-close" onclick="closeDetail()">✕</button>
         </div>
         <div class="detail-body">
-          <!-- 미니 Static Map -->
+          <!-- 미니 카카오 지도 -->
           <div class="detail-minimap">
-            <img id="dp-minimap-img" src="" alt="위치" onerror="this.style.display='none'"/>
+            <div id="dp-minimap"></div>
             <div class="minimap-pin">📍</div>
           </div>
 
@@ -103,7 +99,7 @@
         <div class="map-btn" onclick="resetMap()" title="전체보기">⊙</div>
       </div>
 
-      <div class="map-api-notice">🗺️ Naver Static Map API</div>
+      <div class="map-api-notice">🗺️ Kakao Map API</div>
     </div>
 
     <!-- 사이드바 -->
@@ -338,7 +334,7 @@
         <button class="btn-find-route" onclick="findRoute()">🔍 경로 검색</button>
       </div>
       <div id="dir-map-wrap" class="dir-map-wrap" style="display:none;">
-        <img id="dir-map-img" src="" alt="경로 지도"/>
+        <div id="dir-kakao-map"></div>
       </div>
       <div id="dir-result" style="display:none;"></div>
     </div>
@@ -356,6 +352,7 @@
   </div>
 </footer>
 
+<script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=3f139e529041e40ffaecd1a21f29dc05&autoload=false&libraries=services" data-kakao-sdk="1"></script>
 <script src="app.js"></script>
 </body>
 </html>
