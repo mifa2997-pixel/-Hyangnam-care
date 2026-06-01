@@ -11,16 +11,28 @@ let dirMap = null;
 let dirMarkers = [];
 let dirPolyline = null;
 
-// ─── 데이터 ───────────────────────────────────────────
+// ─── 데이터 (마커 위치 = lat/lng 고정, WGS84) ─────────────
 const CENTERS = [
+  // LH행복꿈터 에스라 지역아동센터
   {id:'CTR001',name:'지역아동센터 LH행복꿈터에스라',addr:'경기 화성시 만세구 향남읍 상신하길로356번길 15 관리동 2층',phone:'031-8059-1116',slots:2,type:'지역아동센터',lat:37.120066,lng:126.913853},
+  // 지역아동센터 온사랑
   {id:'CTR002',name:'지역아동센터 온사랑',addr:'경기 화성시 만세구 향남읍 행정중앙1로 39 408동 104호',phone:'031-8050-8731',slots:1,type:'지역아동센터',lat:37.126262,lng:126.919774},
+  // 다함께 돌봄센터 서봉마을
   {id:'CTR003',name:'다함께 돌봄센터 서봉마을',addr:'경기 화성시 만세구 향남읍 상신하길로273번길 57 주민공동생활시설',phone:'0507-1348-7379',slots:2,type:'다함께돌봄센터',lat:37.116999,lng:126.905238},
+  // 다함께 돌봄센터 향남
   {id:'CTR004',name:'다함께 돌봄센터 향남',addr:'경기도 화성시 만세구 향남읍 상신하길로 35 LH18단지 내 관리사무소',phone:'031-8058-0272',slots:0,type:'다함께돌봄센터',lat:37.097731,lng:126.896227},
+  // 다함께 돌봄센터 향남2
   {id:'CTR005',name:'다함께 돌봄센터 향남2',addr:'경기도 화성시 만세구 향남읍 상신하길로273번길 17',phone:'031-354-7847',slots:0,type:'다함께돌봄센터',lat:37.112831,lng:126.907120},
+  // 두근두근 작은 도서관
   {id:'CTR006',name:'두근두근 작은 도서관',addr:'경기도 화성시 만세구 향남읍 발안로 113',phone:'031-352-1843',slots:0,type:'작은도서관',lat:37.131671,lng:126.923032},
+  // 꿈나무 작은 도서관
   {id:'CTR007',name:'꿈나무 작은 도서관',addr:'경기도 화성시 향남읍 발안남로 66 관리동건물',phone:'031-366-0827',slots:0,type:'작은도서관',lat:37.129122,lng:126.902995},
 ];
+
+const MAP_DEFAULT = {
+  lat: Math.round(CENTERS.reduce((s, c) => s + c.lat, 0) / CENTERS.length * 1e6) / 1e6,
+  lng: Math.round(CENTERS.reduce((s, c) => s + c.lng, 0) / CENTERS.length * 1e6) / 1e6,
+};
 
 // ─── 기관별 로그인 코드 & 비밀번호 ──────────────────────
 // ※ 각 기관 관리자에게 개별 안내하세요
@@ -38,7 +50,7 @@ const STATE = {
   slots:{}, posts:{}, profiles:{},
   loggedIn:null, selectedFile:null,
   zoom:14, filter:'all',
-  centerLat:37.119240, centerLng:126.909748,
+  centerLat: MAP_DEFAULT.lat, centerLng: MAP_DEFAULT.lng,
   currentCenter:null,
 };
 CENTERS.forEach(c => { STATE.slots[c.id] = c.slots; });
@@ -83,6 +95,31 @@ function showTab(tab) {
 // ═══════════════════════════════════════════════════════
 function toKakaoLevel(zoom) {
   return Math.max(1, Math.min(14, Math.round(19 - zoom)));
+}
+
+function centerPos(c) {
+  return new kakao.maps.LatLng(c.lat, c.lng);
+}
+
+function getVisibleCenters() {
+  return CENTERS.filter(c => STATE.filter === 'all' || c.type === STATE.filter);
+}
+
+/** 지도에 보이는 기관 마커(CENTERS lat/lng)가 모두 들어오도록 화면만 맞춤 */
+function fitMapToCenters(list) {
+  if (!mainMap || !list.length) return;
+  if (list.length === 1) {
+    mainMap.setCenter(centerPos(list[0]));
+    mainMap.setLevel(toKakaoLevel(16));
+  } else {
+    const bounds = new kakao.maps.LatLngBounds();
+    list.forEach(c => bounds.extend(centerPos(c)));
+    mainMap.setBounds(bounds, 56, 56, 56, 56);
+  }
+  const c = mainMap.getCenter();
+  STATE.centerLat = c.getLat();
+  STATE.centerLng = c.getLng();
+  STATE.zoom = Math.max(10, Math.min(18, 19 - mainMap.getLevel()));
 }
 
 function kakaoSdkUrl() {
@@ -215,6 +252,7 @@ function initMainMap() {
     STATE.zoom = Math.max(10, Math.min(18, 19 - mainMap.getLevel()));
   });
   renderMainMarkers();
+  fitMapToCenters(getVisibleCenters());
   document.getElementById('map-loading').style.display = 'none';
   container.style.opacity = '1';
   requestAnimationFrame(() => mainMap.relayout());
@@ -231,7 +269,7 @@ function renderMainMarkers() {
     const content = markerContent(c, isActive);
     content.onclick = () => selectCenter(idx);
     const overlay = new kakao.maps.CustomOverlay({
-      position: new kakao.maps.LatLng(c.lat, c.lng),
+      position: centerPos(c),
       content,
       yAnchor: 1,
       zIndex: isActive ? 10 : 3,
@@ -247,12 +285,14 @@ function panMainMap(lat, lng, zoom) {
   if (zoom != null) mainMap.setLevel(toKakaoLevel(zoom));
 }
 
-function loadStaticMap(lat, lng) {
+function loadStaticMap(lat, lng, zoom) {
   if (!mainMap) return;
-  const clat = lat ?? STATE.centerLat;
-  const clng = lng ?? STATE.centerLng;
-  panMainMap(clat, clng, STATE.zoom);
   renderMainMarkers();
+  if (lat != null && lng != null) {
+    panMainMap(lat, lng, zoom ?? STATE.zoom);
+  } else {
+    fitMapToCenters(getVisibleCenters());
+  }
 }
 
 function showMapFallback(err) {
@@ -303,17 +343,18 @@ function resetMap() {
   STATE.zoom = 14;
   STATE.currentCenter = null;
   closeDetail();
-  STATE.centerLat = 37.119240;
-  STATE.centerLng = 126.909748;
+  STATE.centerLat = MAP_DEFAULT.lat;
+  STATE.centerLng = MAP_DEFAULT.lng;
   loadStaticMap();
 }
 
 // ─── 기관 선택 ───────────────────────────────────────
 function selectCenter(idx) {
   const c = CENTERS[idx];
-  STATE.currentCenter = c; STATE.centerLat = c.lat; STATE.centerLng = c.lng; STATE.zoom = 16;
+  STATE.currentCenter = c;
+  STATE.zoom = 16;
   document.querySelectorAll('.center-card').forEach(el => el.classList.toggle('selected', el.dataset.idx == idx));
-  loadStaticMap(c.lat, c.lng);
+  loadStaticMap(c.lat, c.lng, 16);
   const slots = getSlots(c.id);
   document.getElementById('dp-name').textContent = c.name;
   document.getElementById('dp-badge').textContent = c.type;
