@@ -193,6 +193,10 @@ header {
   font-size: 11px; background: white; padding: 2px 6px; border-radius: 4px;
   border: 1px solid var(--border); word-break: break-all;
 }
+.map-fallback-hint a { color: var(--primary-dark); font-weight: 700; }
+.map-fallback-hint code {
+  font-size: 10px; background: #fff8e1; padding: 1px 4px; border-radius: 3px;
+}
 
 /* ─── SIDEBAR ─── */
 .sidebar {

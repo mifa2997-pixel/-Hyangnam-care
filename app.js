@@ -13,13 +13,13 @@ let dirPolyline = null;
 
 // ─── 데이터 ───────────────────────────────────────────
 const CENTERS = [
-  {id:'CTR001',name:'지역아동센터 LH행복꿈터에스라',addr:'경기 화성시 만세구 향남읍 상신하길로356번길 15 관리동 2층',phone:'031-8059-1116',slots:2,type:'지역아동센터',lat:37.0768,lng:126.9742},
-  {id:'CTR002',name:'지역아동센터 온사랑',addr:'경기 화성시 만세구 향남읍 행정중앙1로 39 408동 104호',phone:'031-8050-8731',slots:1,type:'지역아동센터',lat:37.0783,lng:126.9768},
-  {id:'CTR003',name:'다함께 돌봄센터 서봉마을',addr:'경기 화성시 만세구 향남읍 상신하길로273번길 57 주민공동생활시설',phone:'0507-1348-7379',slots:2,type:'다함께돌봄센터',lat:37.0755,lng:126.9728},
-  {id:'CTR004',name:'다함께 돌봄센터 향남',addr:'경기도 화성시 만세구 향남읍 상신하길로 35 LH18단지 내 관리사무소',phone:'031-8058-0272',slots:0,type:'다함께돌봄센터',lat:37.0745,lng:126.9715},
-  {id:'CTR005',name:'다함께 돌봄센터 향남2',addr:'경기도 화성시 만세구 향남읍 상신하길로273번길 17',phone:'031-354-7847',slots:0,type:'다함께돌봄센터',lat:37.0760,lng:126.9710},
-  {id:'CTR006',name:'두근두근 작은 도서관',addr:'경기도 화성시 만세구 향남읍 발안로 113',phone:'031-352-1843',slots:0,type:'작은도서관',lat:37.0795,lng:126.9780},
-  {id:'CTR007',name:'꿈나무 작은 도서관',addr:'경기도 화성시 향남읍 발안남로 66 관리동건물',phone:'031-366-0827',slots:0,type:'작은도서관',lat:37.0810,lng:126.9792},
+  {id:'CTR001',name:'지역아동센터 LH행복꿈터에스라',addr:'경기 화성시 만세구 향남읍 상신하길로356번길 15 관리동 2층',phone:'031-8059-1116',slots:2,type:'지역아동센터',lat:37.120066,lng:126.913853},
+  {id:'CTR002',name:'지역아동센터 온사랑',addr:'경기 화성시 만세구 향남읍 행정중앙1로 39 408동 104호',phone:'031-8050-8731',slots:1,type:'지역아동센터',lat:37.126262,lng:126.919774},
+  {id:'CTR003',name:'다함께 돌봄센터 서봉마을',addr:'경기 화성시 만세구 향남읍 상신하길로273번길 57 주민공동생활시설',phone:'0507-1348-7379',slots:2,type:'다함께돌봄센터',lat:37.116999,lng:126.905238},
+  {id:'CTR004',name:'다함께 돌봄센터 향남',addr:'경기도 화성시 만세구 향남읍 상신하길로 35 LH18단지 내 관리사무소',phone:'031-8058-0272',slots:0,type:'다함께돌봄센터',lat:37.097731,lng:126.896227},
+  {id:'CTR005',name:'다함께 돌봄센터 향남2',addr:'경기도 화성시 만세구 향남읍 상신하길로273번길 17',phone:'031-354-7847',slots:0,type:'다함께돌봄센터',lat:37.112831,lng:126.907120},
+  {id:'CTR006',name:'두근두근 작은 도서관',addr:'경기도 화성시 만세구 향남읍 발안로 113',phone:'031-352-1843',slots:0,type:'작은도서관',lat:37.131671,lng:126.923032},
+  {id:'CTR007',name:'꿈나무 작은 도서관',addr:'경기도 화성시 향남읍 발안남로 66 관리동건물',phone:'031-366-0827',slots:0,type:'작은도서관',lat:37.129122,lng:126.902995},
 ];
 
 // ─── 기관별 로그인 코드 & 비밀번호 ──────────────────────
@@ -38,7 +38,7 @@ const STATE = {
   slots:{}, posts:{}, profiles:{},
   loggedIn:null, selectedFile:null,
   zoom:14, filter:'all',
-  centerLat:37.0775, centerLng:126.9748,
+  centerLat:37.119240, centerLng:126.909748,
   currentCenter:null,
 };
 CENTERS.forEach(c => { STATE.slots[c.id] = c.slots; });
@@ -100,28 +100,64 @@ function loadKakaoSdk() {
       reject(new Error('Kakao app key missing'));
       return;
     }
-    const onReady = () => {
+
+    let settled = false;
+    const fail = (msg) => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(msg));
+    };
+    const succeed = () => {
+      if (settled) return;
       if (!window.kakao || !window.kakao.maps) {
-        reject(new Error('Kakao SDK unavailable'));
+        fail('Kakao SDK unavailable');
         return;
       }
+      settled = true;
       kakao.maps.load(resolve);
     };
+
+    const timeout = setTimeout(() => fail('Kakao SDK load failed'), 12000);
+
+    const onReady = () => {
+      clearTimeout(timeout);
+      succeed();
+    };
+    const onFail = () => {
+      clearTimeout(timeout);
+      const el = document.querySelector('script[data-kakao-sdk]');
+      if (el) el.dataset.kakaoFailed = '1';
+      fail('Kakao SDK load failed');
+    };
+
     if (window.kakao && window.kakao.maps) {
-      onReady();
+      clearTimeout(timeout);
+      succeed();
       return;
     }
+
     const existing = document.querySelector('script[data-kakao-sdk]');
     if (existing) {
+      if (existing.dataset.kakaoFailed === '1') {
+        clearTimeout(timeout);
+        fail('Kakao SDK load failed');
+        return;
+      }
+      if (existing.readyState === 'complete' || existing.readyState === 'loaded') {
+        if (window.kakao && window.kakao.maps) onReady();
+        else onFail();
+        return;
+      }
       existing.addEventListener('load', onReady, { once: true });
-      existing.addEventListener('error', () => reject(new Error('Kakao SDK load failed')), { once: true });
+      existing.addEventListener('error', onFail, { once: true });
       return;
     }
+
     const script = document.createElement('script');
     script.src = kakaoSdkUrl();
     script.dataset.kakaoSdk = '1';
     script.onload = onReady;
-    script.onerror = () => reject(new Error('Kakao SDK load failed'));
+    script.onerror = onFail;
     document.head.appendChild(script);
   });
 }
@@ -143,12 +179,13 @@ function mapLoadHint(err) {
   }
   const origin = location.origin || '(현재 주소)';
   const steps = [
-    '① 카카오 개발자 콘솔 → 내 애플리케이션 → 해당 앱 → <b>제품 설정</b>에서 <b>지도</b>(OPEN_MAP_AND_LOCAL) 서비스를 <b>활성화</b>하세요.',
-    '② <b>앱 키</b> 탭의 <b>JavaScript 키</b>를 app.js의 KAKAO_APP_KEY에 넣었는지 확인하세요. (REST API 키는 사용할 수 없습니다)',
-    '③ <b>플랫폼</b> → Web 사이트 도메인에 <b>' + origin + '</b> 를 등록하세요. (로컬 테스트: http://127.0.0.1:5500, http://localhost:5500 등)',
+    '① <a href="https://developers.kakao.com/console/app" target="_blank" rel="noopener">카카오 개발자 콘솔</a> → 앱 <b>향남지구 돌봄센터안내</b> → <b>제품 설정</b> → <b>지도</b>·<b>로컬</b>을 <b>ON</b> (OPEN_MAP_AND_LOCAL). 현재 이 서비스가 꺼져 있어 SDK가 403으로 거부됩니다.',
+    '② <b>앱 키</b>의 <b>JavaScript 키</b>만 사용 (REST API 키 불가).',
+    '③ <b>플랫폼 → Web</b> 도메인 등록: <b>' + origin + '</b>'
+      + (origin.includes('vercel.app') ? '' : ' · 배포 시 <b>https://hyangnam-care.vercel.app</b> 도 추가'),
   ];
   if (err && err.message === 'Kakao SDK load failed') {
-    steps.unshift('SDK가 거부되었습니다. 아래 중 “지도 서비스 비활성화”가 가장 흔한 원인입니다.');
+    steps.unshift('<b>진단:</b> 카카오 서버 응답 — <code>disabled OPEN_MAP_AND_LOCAL service</code>');
   }
   return steps.join('<br>');
 }
@@ -266,8 +303,8 @@ function resetMap() {
   STATE.zoom = 14;
   STATE.currentCenter = null;
   closeDetail();
-  STATE.centerLat = 37.0775;
-  STATE.centerLng = 126.9748;
+  STATE.centerLat = 37.119240;
+  STATE.centerLng = 126.909748;
   loadStaticMap();
 }
 
