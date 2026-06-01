@@ -1,3 +1,24 @@
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
+import {
+  getFirestore, collection, doc, setDoc, getDocs, onSnapshot, serverTimestamp,
+} from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
+import {
+  getStorage, ref, uploadString, getDownloadURL, deleteObject,
+} from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-storage.js';
+
+const firebaseConfig = {
+  apiKey: 'AIzaSyBX2Q-Y6q-Yx0DaEnfbmdwPSZn8wId5EyI',
+  authDomain: 'hyangnam-care-backend.firebaseapp.com',
+  projectId: 'hyangnam-care-backend',
+  storageBucket: 'hyangnam-care-backend.firebasestorage.app',
+  messagingSenderId: '304890650722',
+  appId: '1:304890650722:web:778bb36ae0e36c48c0b13b',
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
+const firebaseStorage = getStorage(firebaseApp);
+const CENTERS_COLLECTION = 'centers';
 // ═══════════════════════════════════════════════════════
 //  ★ 카카오 지도 JavaScript 앱 키
 // ═══════════════════════════════════════════════════════
@@ -58,6 +79,83 @@ CENTERS.forEach(c => { STATE.slots[c.id] = c.slots; });
 // ─── 유틸 ───────────────────────────────────────────
 function getSlots(id) { return STATE.slots[id] ?? 0; }
 function getPosts(id) { return STATE.posts[id] || []; }
+function profileImageSrc(prof) {
+  if (!prof) return '';
+  return prof.imgUrl || prof.imgData || '';
+}
+
+// ─── Firebase (잔여자리·소개·공지) ─────────────────────
+function applyCenterDoc(centerId, data) {
+  if (typeof data.slots === 'number') STATE.slots[centerId] = data.slots;
+  if (data.profile) {
+    if (!STATE.profiles[centerId]) STATE.profiles[centerId] = {};
+    STATE.profiles[centerId].desc = data.profile.desc || '';
+    if (data.profile.imgUrl) STATE.profiles[centerId].imgUrl = data.profile.imgUrl;
+  }
+  if (Array.isArray(data.posts)) STATE.posts[centerId] = data.posts;
+}
+
+async function loadFromFirestore() {
+  const snap = await getDocs(collection(db, CENTERS_COLLECTION));
+  snap.forEach(d => applyCenterDoc(d.id, d.data()));
+}
+
+async function persistCenter(centerId) {
+  if (!centerId) return;
+  const prof = STATE.profiles[centerId] || {};
+  await setDoc(doc(db, CENTERS_COLLECTION, centerId), {
+    slots: getSlots(centerId),
+    profile: { desc: prof.desc || '', imgUrl: prof.imgUrl || '' },
+    posts: getPosts(centerId),
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+}
+
+async function uploadProfileImage(centerId, dataUrl) {
+  const fileRef = ref(firebaseStorage, 'center-profiles/' + centerId + '.jpg');
+  await uploadString(fileRef, dataUrl, 'data_url');
+  return getDownloadURL(fileRef);
+}
+
+async function deleteProfileImageStorage(centerId) {
+  try {
+    await deleteObject(ref(firebaseStorage, 'center-profiles/' + centerId + '.jpg'));
+  } catch (_) { /* 파일 없음 */ }
+}
+
+let unsubscribeCenters = null;
+function subscribeFirestore(onChange) {
+  if (unsubscribeCenters) unsubscribeCenters();
+  unsubscribeCenters = onSnapshot(
+    collection(db, CENTERS_COLLECTION),
+    () => loadFromFirestore().then(onChange).catch(console.warn),
+    err => console.warn('[Firestore]', err)
+  );
+}
+
+function refreshUiAfterDataChange() {
+  buildSidebar();
+  buildList();
+  if (STATE.loggedIn) {
+    renderSlotPanel();
+    renderProfileAdmin();
+    renderAdminPosts();
+  }
+  if (STATE.currentCenter) {
+    const slots = getSlots(STATE.currentCenter.id);
+    document.getElementById('dp-slot-num').textContent = slots;
+    document.getElementById('dp-slot-status').textContent = slots > 0 ? '신청 가능' : '자리 없음';
+    document.getElementById('dp-slot-box').className = 'slot-box ' + (slots > 0 ? 'avail' : 'full');
+    const promos = getPosts(STATE.currentCenter.id);
+    document.getElementById('dp-promos').innerHTML = promos.length === 0
+      ? '<div class="promo-empty">아직 등록된 공지가 없어요 🌱</div>'
+      : promos.slice(0, 3).map(p => `<div class="promo-item">
+          <div class="promo-item-title">${p.type} ${p.title}</div>
+          <div class="promo-item-meta">${p.date}</div>
+          <div class="promo-item-desc">${p.content.substring(0, 55)}${p.content.length > 55 ? '…' : ''}</div>
+        </div>`).join('');
+  }
+}
 
 function typeMC(t) {
   if (t==='지역아동센터') return 'care';
@@ -551,8 +649,9 @@ function buildList() {
   document.getElementById('list-grid').innerHTML = list.map(c => {
     const slots = getSlots(c.id);
     const prof  = STATE.profiles[c.id];
-    const thumb = prof && prof.imgData
-      ? `<div class="list-card-thumb" style="background-image:url('${prof.imgData}')"></div>`
+    const img = profileImageSrc(prof);
+    const thumb = img
+      ? `<div class="list-card-thumb" style="background-image:url('${img}')"></div>`
       : `<div class="list-card-thumb no-img">${typeIcon(c.type)}</div>`;
     return `<div class="list-card" onclick="openProfile('${c.id}')">
       ${thumb}
@@ -592,8 +691,9 @@ function openProfile(id) {
   slotEl.className    = 'prof-slot-chip ' + (slots > 0 ? 'avail' : 'full');
 
   const imgWrap = document.getElementById('prof-img-wrap');
-  if (prof.imgData) {
-    imgWrap.innerHTML = `<img src="${prof.imgData}" alt="기관 사진" class="prof-img"/>`;
+  const img = profileImageSrc(prof);
+  if (img) {
+    imgWrap.innerHTML = `<img src="${img}" alt="기관 사진" class="prof-img"/>`;
     imgWrap.style.display = 'block';
   } else {
     imgWrap.style.display = 'none';
@@ -670,20 +770,19 @@ function onSlotInput() {
 }
 
 /* ─ 저장 ─ */
-function saveSlot() {
+async function saveSlot() {
   if (!STATE.loggedIn) return;
   const val = Math.max(0, Math.min(99, parseInt(document.getElementById('slot-input').value) || 0));
   STATE.slots[STATE.loggedIn] = val;
   renderSlotPanel();
-  buildSidebar();
-  buildList();
-  // 지도 상세 패널이 열려 있으면 즉시 반영
-  if (STATE.currentCenter && STATE.currentCenter.id === STATE.loggedIn) {
-    document.getElementById('dp-slot-num').textContent    = val;
-    document.getElementById('dp-slot-status').textContent = val > 0 ? '신청 가능' : '자리 없음';
-    document.getElementById('dp-slot-box').className = 'slot-box ' + (val > 0 ? 'avail' : 'full');
+  refreshUiAfterDataChange();
+  try {
+    await persistCenter(STATE.loggedIn);
+    showToast('✅ 잔여 자리 ' + val + '자리로 저장했습니다');
+  } catch (e) {
+    console.warn('saveSlot:', e);
+    showToast('⚠️ 화면에는 반영됐으나 클라우드 저장 실패');
   }
-  showToast('✅ 잔여 자리 ' + val + '자리로 저장했습니다');
 }
 function handleFile(input) {
   if (input.files[0]) {
@@ -691,7 +790,7 @@ function handleFile(input) {
     document.getElementById('file-label').textContent = '📎 ' + input.files[0].name;
   }
 }
-function submitPost() {
+async function submitPost() {
   if (!STATE.loggedIn) return;
   const title   = document.getElementById('post-title').value.trim();
   const type    = document.getElementById('post-type').value;
@@ -707,12 +806,26 @@ function submitPost() {
   document.getElementById('file-label').textContent = '클릭하여 파일 첨부';
   document.getElementById('file-input').value = '';
   STATE.selectedFile = null;
-  renderAdminPosts(); showToast('✅ 공지가 등록되었습니다');
+  renderAdminPosts();
+  try {
+    await persistCenter(STATE.loggedIn);
+    showToast('✅ 공지가 등록되었습니다');
+  } catch (e) {
+    console.warn('submitPost:', e);
+    showToast('⚠️ 등록됐으나 클라우드 저장 실패');
+  }
 }
-function deletePost(id) {
+async function deletePost(id) {
   if (!STATE.loggedIn) return;
   STATE.posts[STATE.loggedIn] = (STATE.posts[STATE.loggedIn]||[]).filter(p => p.id !== id);
-  renderAdminPosts(); showToast('🗑️ 삭제되었습니다');
+  renderAdminPosts();
+  try {
+    await persistCenter(STATE.loggedIn);
+    showToast('🗑️ 삭제되었습니다');
+  } catch (e) {
+    console.warn('deletePost:', e);
+    showToast('⚠️ 삭제됐으나 클라우드 동기화 실패');
+  }
 }
 function renderAdminPosts() {
   const posts = getPosts(STATE.loggedIn);
@@ -735,8 +848,9 @@ function renderProfileAdmin() {
   const prof = STATE.profiles[id] || {};
   document.getElementById('prof-desc-input').value = prof.desc || '';
   const preview = document.getElementById('prof-img-preview');
-  if (prof.imgData) {
-    preview.innerHTML = `<img src="${prof.imgData}" alt="미리보기" style="max-width:100%;border-radius:10px;"/>`;
+  const img = profileImageSrc(prof);
+  if (img) {
+    preview.innerHTML = `<img src="${img}" alt="미리보기" style="max-width:100%;border-radius:10px;"/>`;
   } else {
     preview.innerHTML = '<span style="color:var(--text-muted);font-size:12px;">등록된 사진이 없습니다</span>';
   }
@@ -754,24 +868,45 @@ function handleProfileImg(input) {
   reader.readAsDataURL(input.files[0]);
 }
 
-function saveProfile() {
-  const id   = STATE.loggedIn;
+async function saveProfile() {
+  const id = STATE.loggedIn;
+  if (!id) return;
   const desc = document.getElementById('prof-desc-input').value.trim();
   if (!STATE.profiles[id]) STATE.profiles[id] = {};
   STATE.profiles[id].desc = desc;
-  if (STATE.profiles[id]._pendingImg) {
-    STATE.profiles[id].imgData = STATE.profiles[id]._pendingImg;
-    delete STATE.profiles[id]._pendingImg;
+  try {
+    if (STATE.profiles[id]._pendingImg) {
+      STATE.profiles[id].imgUrl = await uploadProfileImage(id, STATE.profiles[id]._pendingImg);
+      delete STATE.profiles[id].imgData;
+      delete STATE.profiles[id]._pendingImg;
+    }
+    await persistCenter(id);
+    buildList();
+    showToast('✅ 기관 소개가 저장되었습니다');
+  } catch (e) {
+    console.warn('saveProfile:', e);
+    if (STATE.profiles[id]._pendingImg) {
+      STATE.profiles[id].imgData = STATE.profiles[id]._pendingImg;
+      delete STATE.profiles[id]._pendingImg;
+    }
+    buildList();
+    showToast('⚠️ 소개 저장 실패 — Firestore/Storage 규칙을 확인하세요');
   }
-  buildList();
-  showToast('✅ 기관 소개가 저장되었습니다');
 }
 
-function deleteProfileImg() {
+async function deleteProfileImg() {
   const id = STATE.loggedIn;
+  if (!id) return;
   if (STATE.profiles[id]) {
     delete STATE.profiles[id].imgData;
+    delete STATE.profiles[id].imgUrl;
     delete STATE.profiles[id]._pendingImg;
+  }
+  try {
+    await deleteProfileImageStorage(id);
+    await persistCenter(id);
+  } catch (e) {
+    console.warn('deleteProfileImg:', e);
   }
   document.getElementById('prof-img-input').value = '';
   renderProfileAdmin();
@@ -786,9 +921,27 @@ window.addEventListener('resize', () => {
 });
 
 // ─── INIT ─────────────────────────────────────────────
-buildSidebar();
-buildList();
-loadKakaoSdk()
-  .then(() => whenMapContainerReady())
-  .then(() => initMainMap())
-  .catch(err => showMapFallback(err));
+async function bootstrap() {
+  try {
+    await loadFromFirestore();
+    subscribeFirestore(refreshUiAfterDataChange);
+    console.info('[Firebase] Firestore 연동됨');
+  } catch (e) {
+    console.warn('[Firebase] 초기 로드 실패:', e);
+  }
+  refreshUiAfterDataChange();
+  loadKakaoSdk()
+    .then(() => whenMapContainerReady())
+    .then(() => initMainMap())
+    .catch(err => showMapFallback(err));
+}
+
+// HTML onclick 에서 호출 (ES module → window 등록)
+Object.assign(window, {
+  showTab, closeDetail, callCenter, openDirections, closeDirections, findRoute,
+  changeZoom, resetMap, setFilter, setListFilter, selectCenter, openProfile, closeProfile,
+  doLogin, doLogout, adjustSlot, onSlotInput, saveSlot, saveProfile, deleteProfileImg,
+  submitPost, deletePost, closeCallModal, handleFile, handleProfileImg,
+});
+
+bootstrap();
