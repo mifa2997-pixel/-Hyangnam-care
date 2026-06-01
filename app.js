@@ -1,14 +1,15 @@
 // ═══════════════════════════════════════════════════════
-//  ★ 네이버 클라우드 플랫폼 Client ID
+//  ★ 카카오 지도 JavaScript 앱 키
 // ═══════════════════════════════════════════════════════
-const NAVER_CLIENT_ID = 'z7obv9rdd3';
+const KAKAO_APP_KEY = '3f139e529041e40ffaecd1a21f29dc05';
 
-const API = {
-  staticMap:    'https://naveropenapi.apigw.ntruss.com/map-static/v2/raster',
-  geocode:      'https://naveropenapi.apigw.ntruss.com/map-geocode/v2/geocode',
-  directions5:  'https://naveropenapi.apigw.ntruss.com/map-direction/v1/driving',
-  directions15: 'https://naveropenapi.apigw.ntruss.com/map-direction-15/v1/driving',
-};
+let mainMap = null;
+let mainOverlays = [];
+let miniMap = null;
+let miniOverlay = null;
+let dirMap = null;
+let dirMarkers = [];
+let dirPolyline = null;
 
 // ─── 데이터 ───────────────────────────────────────────
 const CENTERS = [
@@ -78,115 +79,195 @@ function showTab(tab) {
 }
 
 // ═══════════════════════════════════════════════════════
-//  STATIC MAP API
+//  KAKAO MAP API
 // ═══════════════════════════════════════════════════════
-function buildMapUrl(lat, lng, zoom, w, h) {
-  if (NAVER_CLIENT_ID === 'YOUR_NAVER_CLIENT_ID') return '';
-  const colorMap = { '지역아동센터':'26A69A', '다함께돌봄센터':'4CAF50', '작은도서관':'FFD600' };
-  let url = API.staticMap
-    + '?center=' + lng + ',' + lat
-    + '&level=' + zoom
-    + '&w=' + w + '&h=' + h
-    + '&scale=2&lang=ko';
-  const visible = CENTERS.filter(c => STATE.filter === 'all' || c.type === STATE.filter);
-  visible.forEach(c => {
-    url += '&markers=type:d|size:mid|pos:' + c.lng + '%20' + c.lat + '|color:' + colorMap[c.type];
-  });
-  url += '&X-NCP-APIGW-API-KEY-ID=' + NAVER_CLIENT_ID;
-  return url;
+function toKakaoLevel(zoom) {
+  return Math.max(1, Math.min(14, Math.round(19 - zoom)));
 }
 
-function buildMiniMapUrl(lat, lng) {
-  if (NAVER_CLIENT_ID === 'YOUR_NAVER_CLIENT_ID') return '';
-  return API.staticMap
-    + '?center=' + lng + ',' + lat
-    + '&level=17&w=270&h=120&scale=2&lang=ko'
-    + '&markers=type:d|size:mid|pos:' + lng + '%20' + lat + '|color:FF5722'
-    + '&X-NCP-APIGW-API-KEY-ID=' + NAVER_CLIENT_ID;
+function kakaoSdkUrl() {
+  return 'https://dapi.kakao.com/v2/maps/sdk.js?appkey='
+    + encodeURIComponent(KAKAO_APP_KEY) + '&autoload=false&libraries=services';
+}
+
+function loadKakaoSdk() {
+  return new Promise((resolve, reject) => {
+    if (location.protocol === 'file:') {
+      reject(new Error('file-protocol'));
+      return;
+    }
+    if (!KAKAO_APP_KEY || KAKAO_APP_KEY === 'YOUR_KAKAO_APP_KEY') {
+      reject(new Error('Kakao app key missing'));
+      return;
+    }
+    const onReady = () => {
+      if (!window.kakao || !window.kakao.maps) {
+        reject(new Error('Kakao SDK unavailable'));
+        return;
+      }
+      kakao.maps.load(resolve);
+    };
+    if (window.kakao && window.kakao.maps) {
+      onReady();
+      return;
+    }
+    const existing = document.querySelector('script[data-kakao-sdk]');
+    if (existing) {
+      existing.addEventListener('load', onReady, { once: true });
+      existing.addEventListener('error', () => reject(new Error('Kakao SDK load failed')), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = kakaoSdkUrl();
+    script.dataset.kakaoSdk = '1';
+    script.onload = onReady;
+    script.onerror = () => reject(new Error('Kakao SDK load failed'));
+    document.head.appendChild(script);
+  });
+}
+
+function whenMapContainerReady() {
+  return new Promise(resolve => {
+    const tick = () => {
+      const area = document.getElementById('map-area');
+      if (area && area.clientWidth > 0 && area.clientHeight > 0) resolve();
+      else requestAnimationFrame(tick);
+    };
+    tick();
+  });
+}
+
+function mapLoadHint(err) {
+  if (location.protocol === 'file:') {
+    return 'HTML을 더블클릭(file://)으로 열면 지도 API가 차단됩니다. VS Code Live Server 등으로 http://127.0.0.1 주소로 실행해 주세요.';
+  }
+  const origin = location.origin || '(현재 주소)';
+  const steps = [
+    '① 카카오 개발자 콘솔 → 내 애플리케이션 → 해당 앱 → <b>제품 설정</b>에서 <b>지도</b>(OPEN_MAP_AND_LOCAL) 서비스를 <b>활성화</b>하세요.',
+    '② <b>앱 키</b> 탭의 <b>JavaScript 키</b>를 app.js의 KAKAO_APP_KEY에 넣었는지 확인하세요. (REST API 키는 사용할 수 없습니다)',
+    '③ <b>플랫폼</b> → Web 사이트 도메인에 <b>' + origin + '</b> 를 등록하세요. (로컬 테스트: http://127.0.0.1:5500, http://localhost:5500 등)',
+  ];
+  if (err && err.message === 'Kakao SDK load failed') {
+    steps.unshift('SDK가 거부되었습니다. 아래 중 “지도 서비스 비활성화”가 가장 흔한 원인입니다.');
+  }
+  return steps.join('<br>');
+}
+
+function markerContent(c, isActive) {
+  const mc = typeMC(c.type);
+  const short = c.name.length > 12 ? c.name.substring(0, 11) + '…' : c.name;
+  const el = document.createElement('div');
+  el.className = 'map-marker' + (isActive ? ' active' : '');
+  el.innerHTML = `<div class="marker-bubble ${mc}">${typeIcon(c.type)} ${short}</div>
+    <div class="marker-tail ${mc}"></div>`;
+  return el;
+}
+
+function initMainMap() {
+  const container = document.getElementById('kakao-map');
+  if (!container) throw new Error('Map container missing');
+  const center = new kakao.maps.LatLng(STATE.centerLat, STATE.centerLng);
+  mainMap = new kakao.maps.Map(container, {
+    center,
+    level: toKakaoLevel(STATE.zoom),
+  });
+  kakao.maps.event.addListener(mainMap, 'idle', () => {
+    const c = mainMap.getCenter();
+    STATE.centerLat = c.getLat();
+    STATE.centerLng = c.getLng();
+    STATE.zoom = Math.max(10, Math.min(18, 19 - mainMap.getLevel()));
+  });
+  renderMainMarkers();
+  document.getElementById('map-loading').style.display = 'none';
+  container.style.opacity = '1';
+  requestAnimationFrame(() => mainMap.relayout());
+}
+
+function renderMainMarkers() {
+  if (!mainMap) return;
+  mainOverlays.forEach(o => o.setMap(null));
+  mainOverlays = [];
+  const visible = CENTERS.filter(c => STATE.filter === 'all' || c.type === STATE.filter);
+  visible.forEach(c => {
+    const idx = CENTERS.indexOf(c);
+    const isActive = STATE.currentCenter && STATE.currentCenter.id === c.id;
+    const content = markerContent(c, isActive);
+    content.onclick = () => selectCenter(idx);
+    const overlay = new kakao.maps.CustomOverlay({
+      position: new kakao.maps.LatLng(c.lat, c.lng),
+      content,
+      yAnchor: 1,
+      zIndex: isActive ? 10 : 3,
+    });
+    overlay.setMap(mainMap);
+    mainOverlays.push(overlay);
+  });
+}
+
+function panMainMap(lat, lng, zoom) {
+  if (!mainMap) return;
+  mainMap.setCenter(new kakao.maps.LatLng(lat, lng));
+  if (zoom != null) mainMap.setLevel(toKakaoLevel(zoom));
 }
 
 function loadStaticMap(lat, lng) {
-  const area = document.getElementById('map-area');
-  const img  = document.getElementById('static-map-img');
-  const w = area.clientWidth || 800;
-  const h = area.clientHeight || 600;
-  const clat = lat || STATE.centerLat;
-  const clng = lng || STATE.centerLng;
-  if (NAVER_CLIENT_ID === 'YOUR_NAVER_CLIENT_ID') { showMapFallback(); return; }
-  document.getElementById('map-loading').style.display = 'flex';
-  img.style.opacity = '0';
-  img.src = buildMapUrl(clat, clng, STATE.zoom, w, h);
+  if (!mainMap) return;
+  const clat = lat ?? STATE.centerLat;
+  const clng = lng ?? STATE.centerLng;
+  panMainMap(clat, clng, STATE.zoom);
+  renderMainMarkers();
 }
 
-function onMapLoaded() {
-  document.getElementById('map-loading').style.display = 'none';
-  document.getElementById('static-map-img').style.opacity = '1';
-  renderMarkerOverlay();
-}
-
-function onMapError() { showMapFallback(); }
-
-function showMapFallback() {
+function showMapFallback(err) {
   document.getElementById('map-loading').style.display = 'none';
   const area = document.getElementById('map-area');
-  document.getElementById('static-map-img').style.display = 'none';
-  if (!document.getElementById('svg-fb')) {
-    const wrap = document.createElement('div');
-    wrap.id = 'svg-fb';
-    wrap.style.cssText = 'position:absolute;inset:0;overflow:hidden;';
-    wrap.innerHTML = `<svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-      <rect width="100%" height="100%" fill="#e8f5e9"/>
-      <defs><pattern id="g" width="44" height="44" patternUnits="userSpaceOnUse"><path d="M44 0L0 0 0 44" fill="none" stroke="#C8E6C9" stroke-width=".8"/></pattern></defs>
-      <rect width="100%" height="100%" fill="url(#g)" opacity=".7"/>
-      <line x1="15%" y1="5%" x2="85%" y2="95%" stroke="#A5D6A7" stroke-width="22" opacity=".55"/>
-      <line x1="0" y1="40%" x2="100%" y2="58%" stroke="#A5D6A7" stroke-width="16" opacity=".5"/>
-      <line x1="25%" y1="0" x2="75%" y2="100%" stroke="#C8E6C9" stroke-width="10" opacity=".4"/>
-      <line x1="15%" y1="5%" x2="85%" y2="95%" stroke="white" stroke-width="3" stroke-dasharray="14,9" opacity=".9"/>
-      <line x1="0" y1="40%" x2="100%" y2="58%" stroke="white" stroke-width="2" stroke-dasharray="10,7" opacity=".9"/>
-      <text x="50%" y="52%" text-anchor="middle" fill="#81C784" font-size="16" font-family="'Gaegu',cursive" font-weight="700" opacity=".6">🌿 향남읍 🌿</text>
-      <rect x="50%" y="5" width="320" height="44" rx="12" fill="white" fill-opacity=".92" transform="translate(-160,0)"/>
-      <text x="50%" y="22" text-anchor="middle" fill="#388E3C" font-size="12" font-family="'Noto Sans KR',sans-serif" font-weight="700">🗺️ Naver Static Map API 연동 대기중</text>
-      <text x="50%" y="38" text-anchor="middle" fill="#6B7C6B" font-size="10" font-family="'Noto Sans KR',sans-serif">NAVER_CLIENT_ID를 app.js에 입력하면 실제 지도가 표시됩니다</text>
-    </svg>`;
-    area.insertBefore(wrap, area.firstChild);
+  const mapEl = document.getElementById('kakao-map');
+  if (mapEl) mapEl.style.display = 'none';
+  const hint = mapLoadHint(err);
+  let panel = document.getElementById('map-fallback-panel');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'map-fallback-panel';
+    panel.className = 'map-fallback-panel';
+    area.appendChild(panel);
   }
-  renderMarkerOverlay();
+  panel.innerHTML = `
+    <div class="map-fallback-title">🗺️ 카카오 지도를 불러올 수 없습니다</div>
+    <div class="map-fallback-hint">${hint}</div>
+    ${location.protocol !== 'file:' ? `<p class="map-fallback-origin">등록할 Web 도메인: <code>${location.origin}</code></p>` : ''}
+  `;
+  if (err) console.warn('Kakao map init:', err);
 }
 
-// ─── 마커 오버레이 ────────────────────────────────────
-function latLngToPixel(lat, lng, w, h, cLat, cLng, zoom) {
-  const scale = Math.pow(2, zoom), ts = 256;
-  function mx(lo) { return (lo + 180) / 360 * ts * scale; }
-  function my(la) { const s = Math.sin(la * Math.PI / 180); return (.5 - Math.log((1+s)/(1-s)) / (4*Math.PI)) * ts * scale; }
-  return { x: w/2 + (mx(lng) - mx(cLng)), y: h/2 + (my(lat) - my(cLat)) };
-}
-
-function renderMarkerOverlay() {
-  const layer = document.getElementById('marker-layer');
-  const area  = document.getElementById('map-area');
-  const w = area.clientWidth, h = area.clientHeight;
-  const visible = CENTERS.filter(c => STATE.filter === 'all' || c.type === STATE.filter);
-  layer.innerHTML = visible.map(c => {
-    const ri = CENTERS.indexOf(c);
-    const p  = latLngToPixel(c.lat, c.lng, w, h, STATE.centerLat, STATE.centerLng, STATE.zoom);
-    const mc = typeMC(c.type);
-    const isAct = STATE.currentCenter && STATE.currentCenter.id === c.id;
-    const short = c.name.length > 12 ? c.name.substring(0, 11) + '…' : c.name;
-    return `<div class="map-marker${isAct?' active':''}" style="left:${p.x}px;top:${p.y}px;" onclick="selectCenter(${ri})">
-      <div class="marker-bubble ${mc}">${typeIcon(c.type)} ${short}</div>
-      <div class="marker-tail ${mc}"></div>
-    </div>`;
-  }).join('');
+function showMiniMap(lat, lng) {
+  const container = document.getElementById('dp-minimap');
+  if (!container || !window.kakao || !window.kakao.maps) return;
+  const pos = new kakao.maps.LatLng(lat, lng);
+  if (!miniMap) {
+    miniMap = new kakao.maps.Map(container, { center: pos, level: 3, draggable: false, scrollwheel: false });
+  } else {
+    miniMap.setCenter(pos);
+    miniMap.setLevel(3);
+  }
+  if (miniOverlay) miniOverlay.setMap(null);
+  miniOverlay = new kakao.maps.Marker({ position: pos });
+  miniOverlay.setMap(miniMap);
+  setTimeout(() => miniMap.relayout(), 50);
 }
 
 function changeZoom(d) {
   STATE.zoom = Math.max(10, Math.min(18, STATE.zoom + d));
-  if (STATE.currentCenter) loadStaticMap(STATE.currentCenter.lat, STATE.currentCenter.lng);
-  else loadStaticMap();
+  if (!mainMap) return;
+  mainMap.setLevel(toKakaoLevel(STATE.zoom));
+  if (STATE.currentCenter) panMainMap(STATE.currentCenter.lat, STATE.currentCenter.lng);
 }
+
 function resetMap() {
-  STATE.zoom = 14; STATE.currentCenter = null; closeDetail();
-  STATE.centerLat = 37.0775; STATE.centerLng = 126.9748;
+  STATE.zoom = 14;
+  STATE.currentCenter = null;
+  closeDetail();
+  STATE.centerLat = 37.0775;
+  STATE.centerLng = 126.9748;
   loadStaticMap();
 }
 
@@ -205,9 +286,7 @@ function selectCenter(idx) {
   document.getElementById('dp-slot-num').textContent    = slots;
   document.getElementById('dp-slot-status').textContent = slots > 0 ? '신청 가능' : '자리 없음';
   box.className = 'slot-box ' + (slots > 0 ? 'avail' : 'full');
-  const mu = buildMiniMapUrl(c.lat, c.lng);
-  const mi = document.getElementById('dp-minimap-img');
-  if (mu) { mi.src = mu; mi.style.display = 'block'; } else { mi.style.display = 'none'; }
+  showMiniMap(c.lat, c.lng);
   const promos = getPosts(c.id);
   document.getElementById('dp-promos').innerHTML = promos.length === 0
     ? '<div class="promo-empty">아직 등록된 공지가 없어요 🌱</div>'
@@ -223,6 +302,7 @@ function closeDetail() {
   document.getElementById('detail-panel').classList.remove('open');
   document.querySelectorAll('.center-card').forEach(el => el.classList.remove('selected'));
   STATE.currentCenter = null;
+  renderMainMarkers();
 }
 function callCenter() {
   if (!STATE.currentCenter) return;
@@ -245,28 +325,68 @@ function setFilter(f, btn) {
 }
 
 // ═══════════════════════════════════════════════════════
-//  GEOCODING + DIRECTIONS API
+//  GEOCODING + 길찾기 (카카오)
 // ═══════════════════════════════════════════════════════
-async function geocode(addr) {
-  if (NAVER_CLIENT_ID === 'YOUR_NAVER_CLIENT_ID') return null;
-  try {
-    const res = await fetch(API.geocode + '?query=' + encodeURIComponent(addr),
-      { headers: { 'X-NCP-APIGW-API-KEY-ID': NAVER_CLIENT_ID } });
-    const d = await res.json();
-    if (d.addresses && d.addresses.length > 0)
-      return { lat: parseFloat(d.addresses[0].y), lng: parseFloat(d.addresses[0].x) };
-  } catch(e) { console.warn('Geocode:', e); }
-  return null;
+function geocode(addr) {
+  return new Promise(resolve => {
+    if (!window.kakao || !window.kakao.maps || !window.kakao.maps.services) {
+      resolve(null);
+      return;
+    }
+    const geocoder = new kakao.maps.services.Geocoder();
+    geocoder.addressSearch(addr, (result, status) => {
+      if (status === kakao.maps.services.Status.OK && result[0]) {
+        resolve({ lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) });
+      } else resolve(null);
+    });
+  });
 }
 
-async function directions(sLat, sLng, gLat, gLng, longDist) {
-  if (NAVER_CLIENT_ID === 'YOUR_NAVER_CLIENT_ID') return null;
-  const ep = longDist ? API.directions15 : API.directions5;
-  try {
-    const url = ep + '?start=' + sLng + ',' + sLat + '&goal=' + gLng + ',' + gLat + '&option=traoptimal';
-    const res = await fetch(url, { headers: { 'X-NCP-APIGW-API-KEY-ID': NAVER_CLIENT_ID } });
-    return await res.json();
-  } catch(e) { console.warn('Directions:', e); return null; }
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function kakaoRouteLink(startLabel, sLat, sLng, dest) {
+  const from = encodeURIComponent(startLabel) + ',' + sLat + ',' + sLng;
+  const to = encodeURIComponent(dest.name) + ',' + dest.lat + ',' + dest.lng;
+  return 'https://map.kakao.com/link/from/' + from + '/to/' + to;
+}
+
+function clearDirMap() {
+  dirMarkers.forEach(m => m.setMap(null));
+  dirMarkers = [];
+  if (dirPolyline) { dirPolyline.setMap(null); dirPolyline = null; }
+}
+
+function showRouteMap(sLat, sLng, dest) {
+  const container = document.getElementById('dir-kakao-map');
+  if (!container || !window.kakao || !window.kakao.maps) return;
+  const start = new kakao.maps.LatLng(sLat, sLng);
+  const end = new kakao.maps.LatLng(dest.lat, dest.lng);
+  if (!dirMap) {
+    dirMap = new kakao.maps.Map(container, { center: start, level: 5 });
+  }
+  clearDirMap();
+  dirMarkers.push(new kakao.maps.Marker({ map: dirMap, position: start }));
+  dirMarkers.push(new kakao.maps.Marker({ map: dirMap, position: end }));
+  dirPolyline = new kakao.maps.Polyline({
+    path: [start, end],
+    strokeWeight: 4,
+    strokeColor: '#4CAF50',
+    strokeOpacity: 0.75,
+    strokeStyle: 'shortdash',
+  });
+  dirPolyline.setMap(dirMap);
+  const bounds = new kakao.maps.LatLngBounds();
+  bounds.extend(start);
+  bounds.extend(end);
+  dirMap.setBounds(bounds, 40, 40, 40, 40);
+  setTimeout(() => dirMap.relayout(), 80);
 }
 
 function openDirections() {
@@ -288,7 +408,7 @@ async function findRoute() {
   re.innerHTML = '<div class="dir-loading">🌿 경로를 찾는 중이에요...</div>';
   re.style.display = 'block'; mw.style.display = 'none';
 
-  if (NAVER_CLIENT_ID === 'YOUR_NAVER_CLIENT_ID') {
+  if (!KAKAO_APP_KEY || KAKAO_APP_KEY === 'YOUR_KAKAO_APP_KEY') {
     re.innerHTML = `<div class="dir-result">
       <div style="font-weight:700;color:var(--primary-dark);margin-bottom:6px;">🗺️ API 키 설정 후 이용 가능해요</div>
       <div style="color:var(--text-muted);font-size:12px;line-height:1.7;">
@@ -300,50 +420,21 @@ async function findRoute() {
   const sc = await geocode(startAddr);
   if (!sc) { re.innerHTML = '<div class="dir-result" style="color:var(--red);">⚠️ 출발지 주소를 찾을 수 없습니다.</div>'; return; }
 
-  const R = 6371;
-  const dLat = (dest.lat - sc.lat) * Math.PI / 180;
-  const dLng = (dest.lng - sc.lng) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(sc.lat*Math.PI/180) * Math.cos(dest.lat*Math.PI/180) * Math.sin(dLng/2)**2;
-  const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  const longDist = dist > 15;
+  const dist = haversineKm(sc.lat, sc.lng, dest.lat, dest.lng);
+  const km = dist.toFixed(1);
+  const min = Math.max(1, Math.ceil(dist / 40 * 60));
+  const navUrl = kakaoRouteLink(startAddr, sc.lat, sc.lng, dest);
 
-  const rd = await directions(sc.lat, sc.lng, dest.lat, dest.lng, longDist);
-  if (!rd || rd.code !== 0) {
-    re.innerHTML = '<div class="dir-result" style="color:var(--red);">⚠️ 경로를 찾을 수 없습니다.</div>'; return;
-  }
-  const route = rd.route?.traoptimal?.[0];
-  if (!route) { re.innerHTML = '<div class="dir-result" style="color:var(--red);">⚠️ 경로 데이터가 없습니다.</div>'; return; }
-
-  const km = (route.summary.distance / 1000).toFixed(1);
-  const min = Math.ceil(route.summary.duration / 60000);
-  const toll = route.summary.tollFare > 0 ? route.summary.tollFare.toLocaleString() + '원' : '없음';
-  const fuel = route.summary.fuelPrice > 0 ? route.summary.fuelPrice.toLocaleString() + '원' : '';
-
-  const path = route.path;
-  const step = Math.max(1, Math.floor(path.length / 25));
-  const sampled = path.filter((_, i) => i % step === 0);
-  const pathStr = sampled.map(p => p[0] + ',' + p[1]).join('|');
-  const midLat = (sc.lat + dest.lat) / 2, midLng = (sc.lng + dest.lng) / 2;
-  const routeZoom = dist < 2 ? 15 : dist < 5 ? 14 : dist < 15 ? 13 : 11;
-
-  const routeMapUrl = API.staticMap
-    + '?center=' + midLng + ',' + midLat
-    + '&level=' + routeZoom + '&w=440&h=220&scale=2&lang=ko'
-    + '&path=color:0x4CAF50CC|width:4|' + pathStr
-    + '&markers=type:d|size:mid|pos:' + sc.lng + '%20' + sc.lat + '|color:FFD600'
-    + '&markers=type:d|size:mid|pos:' + dest.lng + '%20' + dest.lat + '|color:FF5722'
-    + '&X-NCP-APIGW-API-KEY-ID=' + NAVER_CLIENT_ID;
-
-  document.getElementById('dir-map-img').src = routeMapUrl;
+  showRouteMap(sc.lat, sc.lng, dest);
   mw.style.display = 'block';
   re.innerHTML = `<div class="dir-result">
     <div class="dir-stat">
-      <div class="dir-stat-item">🚗 ${km} km</div>
-      <div class="dir-stat-item">⏱️ 약 ${min}분</div>
-      <div class="dir-stat-item">💰 ${toll}</div>
-      ${fuel ? '<div class="dir-stat-item">⛽ ' + fuel + '</div>' : ''}
+      <div class="dir-stat-item">📏 직선 ${km} km</div>
+      <div class="dir-stat-item">⏱️ 약 ${min}분 (예상)</div>
     </div>
-    <div style="color:var(--text-muted);">${startAddr} → ${dest.name}</div>
+    <div style="color:var(--text-muted);margin-bottom:10px;">${startAddr} → ${dest.name}</div>
+    <a class="btn-kakao-nav" href="${navUrl}" target="_blank" rel="noopener noreferrer">🧭 카카오맵에서 길찾기</a>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">상세 경로·소요시간은 카카오맵에서 확인하세요.</div>
   </div>`;
 }
 
@@ -611,10 +702,15 @@ function deleteProfileImg() {
 }
 
 window.addEventListener('resize', () => {
-  if (document.getElementById('page-map').classList.contains('active')) renderMarkerOverlay();
+  if (mainMap) mainMap.relayout();
+  if (miniMap) miniMap.relayout();
+  if (dirMap) dirMap.relayout();
 });
 
 // ─── INIT ─────────────────────────────────────────────
 buildSidebar();
 buildList();
-loadStaticMap();
+loadKakaoSdk()
+  .then(() => whenMapContainerReady())
+  .then(() => initMainMap())
+  .catch(err => showMapFallback(err));
