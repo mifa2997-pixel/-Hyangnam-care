@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>향남지구 아동 돌봄센터 안내</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ══════════════ HEADER ══════════════ -->
+<header>
+  <div class="header-left">
+    <div class="header-logo">🏡</div>
+    <div>
+      <div class="header-title">향남지구 돌봄센터 안내</div>
+      <div class="header-sub">화성시 만세구 향남읍 아동돌봄 통합정보</div>
+    </div>
+  </div>
+  <button class="btn-login" onclick="showTab('center')">🔐 기관 로그인</button>
+</header>
+
+<!-- ══════════════ TABS ══════════════ -->
+<div class="tab-bar">
+  <div class="tab active" onclick="showTab('map')" id="tab-map">🗺️ 지도 안내</div>
+  <div class="tab" onclick="showTab('list')" id="tab-list">📋 전체 목록</div>
+  <div class="tab" onclick="showTab('center')" id="tab-center">🔐 기관 관리</div>
+</div>
+
+<!-- ══════════════ MAP PAGE ══════════════ -->
+<div class="page active" id="page-map">
+  <div class="map-layout">
+
+    <!-- Static Map 영역 -->
+    <div id="map-area">
+      <div class="map-loading" id="map-loading">
+        <div class="map-spinner"></div>
+        <span>🌿 지도를 불러오는 중...</span>
+      </div>
+      <img id="static-map-img" src="" alt="향남지구 지도" style="opacity:0"
+           onload="onMapLoaded()" onerror="onMapError()"/>
+
+      <!-- 마커 오버레이 -->
+      <div id="marker-layer"></div>
+
+      <!-- 상세 패널 -->
+      <div class="detail-panel" id="detail-panel">
+        <div class="detail-hd">
+          <div>
+            <div class="detail-hd-name" id="dp-name"></div>
+            <span class="detail-hd-badge" id="dp-badge"></span>
+          </div>
+          <button class="detail-close" onclick="closeDetail()">✕</button>
+        </div>
+        <div class="detail-body">
+          <!-- 미니 Static Map -->
+          <div class="detail-minimap">
+            <img id="dp-minimap-img" src="" alt="위치" onerror="this.style.display='none'"/>
+            <div class="minimap-pin">📍</div>
+          </div>
+
+          <!-- 잔여 자리 -->
+          <div class="slot-box" id="dp-slot-box">
+            <div>
+              <div class="num" id="dp-slot-num">0</div>
+              <div class="lbl">잔여 자리</div>
+            </div>
+            <div class="status" id="dp-slot-status"></div>
+          </div>
+
+          <div class="detail-row">
+            <span class="detail-icon">📍</span>
+            <div class="detail-text" id="dp-addr"></div>
+          </div>
+          <div class="detail-row">
+            <span class="detail-icon">📞</span>
+            <div class="detail-text" id="dp-phone" style="font-weight:700;color:var(--primary-dark);"></div>
+          </div>
+
+          <button class="btn-inquiry" onclick="callCenter()">📞 문의 및 신청하기</button>
+          <button class="btn-directions" onclick="openDirections()">🧭 길찾기</button>
+
+          <!-- 공지 -->
+          <div class="promo-section">
+            <div class="promo-title">📢 센터 공지 및 홍보</div>
+            <div id="dp-promos"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 범례 -->
+      <div class="map-legend">
+        <div class="map-legend-title">범례</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#4CAF50;"></div>다함께돌봄</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#26A69A;"></div>지역아동센터</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FFD600;"></div>작은도서관</div>
+      </div>
+
+      <!-- 줌 컨트롤 -->
+      <div class="map-controls">
+        <div class="map-btn" onclick="changeZoom(1)" title="확대">＋</div>
+        <div class="map-btn" onclick="changeZoom(-1)" title="축소">－</div>
+        <div class="map-btn" onclick="resetMap()" title="전체보기">⊙</div>
+      </div>
+
+      <div class="map-api-notice">🗺️ Naver Static Map API</div>
+    </div>
+
+    <!-- 사이드바 -->
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <h3>🌿 향남지구 돌봄기관
+          <span id="count-badge" style="font-weight:400;font-size:11px;color:var(--text-muted);"></span>
+        </h3>
+        <p>기관을 선택하면 지도에서 위치를 확인할 수 있어요</p>
+      </div>
+      <div class="sidebar-filter">
+        <button class="filter-btn on" onclick="setFilter('all',this)">🌍 전체</button>
+        <button class="filter-btn" onclick="setFilter('다함께돌봄센터',this)">🧒 다함께돌봄</button>
+        <button class="filter-btn" onclick="setFilter('지역아동센터',this)">🏡 지역아동</button>
+        <button class="filter-btn" onclick="setFilter('작은도서관',this)">📚 도서관</button>
+      </div>
+      <div class="center-list" id="sidebar-list"></div>
+    </div>
+
+  </div><!-- /map-layout -->
+</div><!-- /page-map -->
+
+<!-- ══════════════ LIST PAGE ══════════════ -->
+<div class="page" id="page-list">
+  <div class="list-hero">
+    <div>
+      <h2>📋 전체 돌봄기관 목록</h2>
+      <p>향남읍 내 아동 돌봄기관 · 버튼을 누르면 바로 전화 연결돼요</p>
+    </div>
+    <div class="list-filter">
+      <button class="filter-btn on" onclick="setListFilter('all',this)">🌍 전체</button>
+      <button class="filter-btn" onclick="setListFilter('다함께돌봄센터',this)">🧒 다함께돌봄</button>
+      <button class="filter-btn" onclick="setListFilter('지역아동센터',this)">🏡 지역아동</button>
+      <button class="filter-btn" onclick="setListFilter('작은도서관',this)">📚 도서관</button>
+    </div>
+  </div>
+  <div class="list-grid" id="list-grid"></div>
+</div>
+
+<!-- ══════════════ ADMIN PAGE ══════════════ -->
+<div class="page" id="page-center">
+
+  <!-- 로그인 -->
+  <div id="login-section">
+    <div class="login-box">
+      <div class="login-icon">🔐</div>
+      <div class="login-title">기관 관리 로그인</div>
+      <div class="login-sub">기관 전용 코드로 로그인하여<br>공지사항 및 홍보자료를 등록하세요 🌱</div>
+      <div class="login-field">
+        <input class="login-input" type="text" id="login-code" placeholder="기관 코드 (예: CTR001)"/>
+        <input class="login-input" type="password" id="login-pw" placeholder="비밀번호"/>
+      </div>
+      <button class="btn-do-login" onclick="doLogin()">🌿 로그인</button>
+      <div class="login-err" id="login-err">⚠️ 기관 코드 또는 비밀번호가 올바르지 않습니다.</div>
+      <div class="login-hint">
+        <b>🌸 기관 코드 안내</b><br>
+        각 기관 담당자에게 개별 안내된 코드와 비밀번호를 입력하세요.<br>
+        <span style="font-size:10px;color:#9E9E9E;">※ 코드/비밀번호 문의: 늘봄전담실장</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 관리자 대시보드 -->
+  <div id="admin-section" style="display:none;">
+    <div class="admin-header">
+      <div>
+        <div class="admin-header-name" id="admin-center-name"></div>
+        <div class="admin-header-sub" id="admin-center-code"></div>
+      </div>
+      <button class="btn-logout" onclick="doLogout()">로그아웃</button>
+    </div>
+
+    <!-- 잔여 자리 관리 -->
+    <div class="upload-box">
+      <h4>🪑 잔여 자리 관리</h4>
+
+      <!-- 현재 상태 표시 -->
+      <div class="slot-current-wrap">
+        <div class="slot-current-label">현재 잔여 자리</div>
+        <div class="slot-current-row">
+          <div id="slot-display" class="slot-big-num avail">0</div>
+          <div id="slot-status-text" class="slot-status-lbl avail">✅ 신청 가능</div>
+        </div>
+      </div>
+
+      <!-- 수정 컨트롤 -->
+      <div class="slot-edit-box">
+        <div class="slot-edit-label">변경할 자리 수</div>
+        <div class="slot-ctrl-row">
+          <button class="slot-adj-btn minus" onclick="adjustSlot(-1)">－</button>
+          <input class="slot-spinner" type="number" id="slot-input"
+                 min="0" max="99" value="0" oninput="onSlotInput()"/>
+          <button class="slot-adj-btn plus" onclick="adjustSlot(1)">＋</button>
+        </div>
+        <div id="slot-preview" class="slot-preview avail">0자리</div>
+        <button class="btn-save-slot-big" onclick="saveSlot()">✅ 저장하기</button>
+      </div>
+    </div>
+
+    <!-- 기관 소개 관리 -->
+    <div class="upload-box">
+      <h4>🏢 기관 소개 관리</h4>
+      <div class="form-row">
+        <label class="form-label">기관 소개 글</label>
+        <textarea class="form-textarea" id="prof-desc-input"
+          placeholder="학부모님들께 소개할 기관 설명을 입력하세요&#10;(운영시간, 프로그램, 특징 등)"
+          style="min-height:100px;"></textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label">대표 사진</label>
+        <div class="form-file-area" onclick="document.getElementById('prof-img-input').click()">
+          <div style="font-size:26px;margin-bottom:5px;">🖼️</div>
+          <div style="font-size:12px;color:var(--text-muted);">클릭하여 사진 업로드 (JPG, PNG)</div>
+        </div>
+        <input type="file" id="prof-img-input" class="form-file-input"
+               accept="image/*" onchange="handleProfileImg(this)"/>
+      </div>
+      <div id="prof-img-preview" class="prof-img-preview-box">
+        <span style="color:var(--text-muted);font-size:12px;">등록된 사진이 없습니다</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="btn-post" onclick="saveProfile()" style="flex:1;">✅ 소개 저장하기</button>
+        <button class="btn-del-img" onclick="deleteProfileImg()">🗑️ 사진 삭제</button>
+      </div>
+    </div>
+
+    <!-- 공지 등록 -->
+    <div class="upload-box">
+      <h4>📢 공지 및 홍보자료 등록</h4>
+      <div class="form-row">
+        <label class="form-label">제목</label>
+        <input class="form-input" type="text" id="post-title" placeholder="공지 제목을 입력하세요"/>
+      </div>
+      <div class="form-row">
+        <label class="form-label">유형</label>
+        <select class="form-select" id="post-type">
+          <option value="📢 공지사항">📢 공지사항</option>
+          <option value="🎉 행사안내">🎉 행사안내</option>
+          <option value="📌 모집안내">📌 모집안내</option>
+          <option value="📸 센터소식">📸 센터소식</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label class="form-label">내용</label>
+        <textarea class="form-textarea" id="post-content" placeholder="공지 내용을 입력하세요"></textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label">첨부파일 (선택)</label>
+        <div class="form-file-area" onclick="document.getElementById('file-input').click()">
+          <div style="font-size:28px;margin-bottom:5px;">📎</div>
+          <div style="font-size:12px;color:var(--text-muted);" id="file-label">클릭하여 파일 첨부 (이미지·PDF·문서)</div>
+        </div>
+        <input type="file" id="file-input" class="form-file-input" onchange="handleFile(this)"/>
+      </div>
+      <button class="btn-post" onclick="submitPost()">✅ 등록하기</button>
+    </div>
+
+    <!-- 등록된 공지 목록 -->
+    <div class="post-list">
+      <h4>📋 등록된 공지 / 홍보자료</h4>
+      <div id="admin-posts"></div>
+    </div>
+  </div>
+
+</div><!-- /page-center -->
+
+<!-- ══════════════ 기관 소개 팝업 ══════════════ -->
+<div class="modal-overlay" id="prof-modal">
+  <div class="modal-box prof-modal-box">
+    <div class="prof-modal-hd">
+      <div>
+        <div class="prof-modal-name" id="prof-name"></div>
+        <span class="prof-modal-badge" id="prof-badge"></span>
+      </div>
+      <button class="modal-close" onclick="closeProfile()">✕</button>
+    </div>
+    <div class="prof-modal-body">
+      <!-- 사진 -->
+      <div id="prof-img-wrap" style="display:none;"></div>
+      <!-- 잔여자리 -->
+      <div id="prof-slot" class="prof-slot-chip avail"></div>
+      <!-- 소개글 -->
+      <div class="prof-section-title">📝 기관 소개</div>
+      <div class="prof-desc" id="prof-desc"></div>
+      <!-- 위치/연락처 -->
+      <div class="prof-info-row"><span>📍</span><span id="prof-addr"></span></div>
+      <div class="prof-info-row"><span>📞</span><span id="prof-phone"></span></div>
+      <!-- 버튼 -->
+      <a class="call-modal-btn" id="prof-call-btn" href="#" style="margin-top:14px;">
+        📞 문의 및 신청하기
+      </a>
+      <button class="call-modal-close-btn" onclick="closeProfile()" style="margin-top:8px;">닫기</button>
+      <!-- 숨김 버튼 (callCenter 연결용) -->
+      <button id="prof-call-btn2" style="display:none;"></button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ 전화 안내 팝업 ══════════════ -->
+<div class="modal-overlay" id="call-modal">
+  <div class="modal-box call-modal-box">
+    <div class="call-modal-hd">
+      <div class="call-modal-icon">📞</div>
+      <div class="call-modal-center-name" id="call-modal-name"></div>
+    </div>
+    <div class="call-modal-body">
+      <div class="call-modal-label">문의 전화번호</div>
+      <div class="call-modal-phone" id="call-modal-phone"></div>
+      <div class="call-modal-desc">센터 입급 신청은 위 번호로 문의해주세요.</div>
+      <a class="call-modal-btn" id="call-modal-tel" href="#">
+        📞 전화 연결하기
+      </a>
+      <button class="call-modal-close-btn" onclick="closeCallModal()">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ 길찾기 모달 ══════════════ -->
+<div class="modal-overlay" id="dir-modal">
+  <div class="modal-box">
+    <div class="modal-hd">
+      <h3>🧭 길찾기</h3>
+      <button class="modal-close" onclick="closeDirections()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="dir-form">
+        <input class="dir-input" type="text" id="dir-start"
+               placeholder="출발지 주소 입력 (예: 향남읍 행정복지센터)"/>
+        <input class="dir-input" type="text" id="dir-end" readonly
+               style="background:#F1F8E9;color:var(--text-muted);"/>
+        <button class="btn-find-route" onclick="findRoute()">🔍 경로 검색</button>
+      </div>
+      <div id="dir-map-wrap" class="dir-map-wrap" style="display:none;">
+        <img id="dir-map-img" src="" alt="경로 지도"/>
+      </div>
+      <div id="dir-result" style="display:none;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 토스트 -->
+<div class="toast" id="toast"></div>
+
+<!-- ══════════════ FOOTER ══════════════ -->
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span class="footer-heart">made with ❤️ by 서봉초등학교 늘봄전담실장</span>
+    <span class="footer-copy">모든 권한은 서봉초등학교 늘봄전담실장에게 있습니다.</span>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
